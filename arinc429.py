@@ -105,6 +105,10 @@ class Label:
     def set_bnr(self, value: float, resolution: float, first_bit: int, last_bit: int, sign_bit: int):
         bit_count = last_bit - first_bit + 1
 
+        # Make sure the sign bit is outside the first_bit-last_bit range
+        if sign_bit >= first_bit and sign_bit <= last_bit:
+            arinc429_report_error("The BNR sign bit (bit '" + str(sign_bit) + "') is inside the signification bit range ('" + str(first_bit) + "'-'" + str(last_bit) + "').")
+        
         # Get the encoded value in units of resolution
         encoded_limit = (1 << bit_count) - 1
         encoded = int(value / resolution)
@@ -153,6 +157,7 @@ class Label:
             start_bit = end_bit + 1
 
         if remaining_value:
+            bit_count = last_bit - first_bit + 1
             arinc429_report_error("The BCD value '" + str(value) + "' does not fit into " + str(bit_count) + " bits with radix " + str(radix) + ".")
 
     def set_discrete(self, value: int, first_bit: int, last_bit: int):

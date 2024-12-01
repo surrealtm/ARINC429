@@ -82,14 +82,14 @@ Arinc429 :: struct {
 
             // Make sure the value actually fits into the available number of bits
             if value != 0 && highest_bit_set(value) > last_bit - first_bit {
-                error("The raw value '%' does not fit into % bits.", format_int(value, .Hexadecimal, false, true, 0), last_bit - first_bit + 1);
+                report_error("The raw value '%' does not fit into % bits.", format_int(value, .Hexadecimal, false, true, 0), last_bit - first_bit + 1);
                 return;
             }
 
             // Make sure we're not overwriting some data in the label
             existing_raw := clear_except_range(label.raw, first_bit, last_bit);
             if existing_raw != 0 {
-                error("The bits '%'-'%' have already been occupied in the label.", first_bit, last_bit);
+                report_error("The bits '%'-'%' have already been occupied in the label.", first_bit, last_bit);
                 return;
             }
             
@@ -121,7 +121,7 @@ Arinc429 :: struct {
             encoded_limit: s64 = (1 << bit_count) - 1;
             encoded: s64 = cast(s64) (value / resolution);
             if encoded < -encoded_limit || encoded > encoded_limit {
-                error("The BNR value '%' does not fit into % bits with % as resolution (limit: %).", value, bit_count, resolution, resolution * xx encoded_limit);
+                report_error("The BNR value '%' does not fit into % bits with % as resolution (limit: %).", value, bit_count, resolution, resolution * xx encoded_limit);
                 return;
             }
 
@@ -142,7 +142,7 @@ Arinc429 :: struct {
             // Make sure the digit actually fits into the bits
             encoded_limit: s64 = (1 << bit_count) - 1;
             if digit < 0 || digit > encoded_limit {
-                error("The BCD digit '%' does not fit into % bits (limit: %).", digit, bit_count, encoded_limit);
+                report_error("The BCD digit '%' does not fit into % bits (limit: %).", digit, bit_count, encoded_limit);
                 return;
             }
 
@@ -153,7 +153,7 @@ Arinc429 :: struct {
         set_bcd_value_with_radix :: (label: *Label, value: u32, radix: u32, first_bit: u32, last_bit: u32) {
             // Calculate the bits per digit
             if radix != 10 {
-                error("The BCD radix '%' is unsupported (only 10 is for now).", radix);
+                report_error("The BCD radix '%' is unsupported (only 10 is for now).", radix);
                 return;
             }
 
@@ -171,7 +171,7 @@ Arinc429 :: struct {
 
             if remaining_value != 0 {
                 bit_count := last_bit - first_bit + 1;
-                error("The BCD value '%' does not fit into % bits with radix %.", value, bit_count, radix);
+                report_error("The BCD value '%' does not fit into % bits with radix %.", value, bit_count, radix);
             }
         }
         
@@ -230,7 +230,7 @@ Arinc429 :: struct {
         get_bcd_value_with_radix :: (label: *Label, radix: u32, first_bit: u32, last_bit: u32) -> u32 {
             // Calculate the bits per digit
             if radix != 10 {
-                error("The BCD radix '%' is unsupported (only 10 is for now).", radix);
+                report_error("The BCD radix '%' is unsupported (only 10 is for now).", radix);
                 return 0;
             }
 
@@ -276,7 +276,7 @@ ensure_indices_in_bounds :: (first_bit: u32, last_bit: u32) -> bool {
         last_bit >= 1 && last_bit <= 32 &&
         first_bit <= last_bit;
 
-    if !all_valid error("The passed bit indices '%'-'%' are out of bounds.", first_bit, last_bit);
+    if !all_valid report_error("The passed bit indices '%'-'%' are out of bounds.", first_bit, last_bit);
 
     return all_valid;
 }
