@@ -2,31 +2,31 @@
 
 Arinc429 :: struct {
     Id :: enum (u32) {
-        Altitude          :: 0o076;
-        DoubleStageKnob1  :: 0o136;
-        DoubleStageKnob2  :: 0o137;
-        Lsk1Lsk4          :: 0o141;
-        LSK5Bsk2          :: 0o142;
-        LSK7Lsk10         :: 0o143;
-        Lsk11Bsk4         :: 0o144;
-        Bsk5Msk2          :: 0o145;
-        MagneticVariation :: 0o147;
-        GreenwichMeanTime :: 0o150;
-        Date              :: 0o260;
-        LatitudeCoarse    :: 0o310;
-        LongitudeCoarse   :: 0o311;
-        GroundSpeed       :: 0o312;
-        TrueHeading       :: 0o314;
-        LatitudeFine      :: 0o322;
-        LongitudeFine     :: 0o323;
+        Altitude             :: 0o076;
+        MFD_DoubleStageKnob1 :: 0o136;
+        MFD_DoubleStageKnob2 :: 0o137;
+        MFD_Lsk1Lsk4         :: 0o141;
+        MFD_Lsk5Bsk2         :: 0o142;
+        MFD_Lsk7Lsk10        :: 0o143;
+        MFD_Lsk11Bsk4        :: 0o144;
+        MFD_Bsk5Msk2         :: 0o145;
+        MagneticVariation    :: 0o147;
+        GreenwichMeanTime    :: 0o150;
+        Date                 :: 0o260;
+        LatitudeCoarse       :: 0o310;
+        LongitudeCoarse      :: 0o311;
+        GroundSpeed          :: 0o312;
+        TrueHeading          :: 0o314;
+        LatitudeFine         :: 0o322;
+        LongitudeFine        :: 0o323;
     }
 
     SSM :: enum (u32) {
         // BNR Data
-        BNR_NormalOperation :: 0b11;
-        BNR_FunctionalTest  :: 0b10;
-        BNR_NoComputedData  :: 0b01;
         BNR_FailureWarning  :: 0b00;
+        BNR_NoComputedData  :: 0b01;
+        BNR_FunctionalTest  :: 0b10;
+        BNR_NormalOperation :: 0b11;
 
         // BCD Data
         BCD_Plus  :: 0b00;
@@ -45,19 +45,23 @@ Arinc429 :: struct {
         BCD_Below :: 0b11;
 
         // Discrete Data
-        DISCRETE_VerifiedData    :: 0b00;
-        DISCRETE_NormalOperation :: 0b00;
-        DISCRETE_NoComputedData  :: 0b01;
-        DISCRETE_FunctionalTest  :: 0b10;
-        DISCRETE_FailureWarning  :: 0b11;
+        Discrete_VerifiedData    :: 0b00;
+        Discrete_NormalOperation :: 0b00;
+        Discrete_NoComputedData  :: 0b01;
+        Discrete_FunctionalTest  :: 0b10;
+        Discrete_FailureWarning  :: 0b11;
     }
 
-    ButtonStatus :: enum (u32) {
-        Released :: 0b000;
-        Short    :: 0b001;
-        Medium   :: 0b010;
-        Long     :: 0b011;
-        Pressed  :: 0b100;
+    // Each MFD key is encoded using 4 bits in a discrete label:
+    //   1. Validity of the key (press)
+    //   2. Whether the key is currently being pressed
+    //   3 / 4. Indication of the press duration
+    MFD_KeyStatus :: enum (u32) {
+        Released :: 0b1000;
+        Short    :: 0b1001;
+        Medium   :: 0b1010;
+        Long     :: 0b1011;
+        Pressed  :: 0b1100;
     }
 
     Parity :: enum (u32) {
@@ -166,7 +170,8 @@ Arinc429 :: struct {
             }
 
             if remaining_value != 0 {
-                error("The BCD value '%' does not fit into % bits with radix %.", value, last_bit - first_bit + 1, radix);
+                bit_count := last_bit - first_bit + 1;
+                error("The BCD value '%' does not fit into % bits with radix %.", value, bit_count, radix);
             }
         }
         
@@ -235,6 +240,7 @@ Arinc429 :: struct {
             result: u32 = 0;
             power: u32 = 1;
             start_bit := first_bit;
+
             while start_bit <= last_bit {
                 end_bit := ifx start_bit + bits_per_digit - 1 > last_bit then last_bit else start_bit + bits_per_digit - 1;
                 result += Label.get_bcd_digit(label, start_bit, end_bit) * power;
@@ -281,3 +287,48 @@ clear_except_range :: (value: u32, first_bit: u32, last_bit: u32) -> u32 {
     result &= 0xffffffff << (first_bit - 1);
     return result;
 }
+
+
+/*
+main :: () -> s32 {
+    #using Arinc429;
+
+    // Ground Speed
+    {
+        label := Label.{};
+        Label.set_id(*label, .GroundSpeed);
+        Label.set_ssm(*label, .BNR_NormalOperation);
+        Label.set_sdi(*label, 0b00);
+        Label.set_bnr(*label, 140, 4096 / 32768, 14, 28, 29);
+        Label.set_parity(*label, .Odd);
+        print("GroundSpeed: % (raw: %)\n", Label.get_bnr(*label, 4096 / 32768, 14, 28, 29), format_int(label.raw, .Hexadecimal, false, true, 0));
+    }
+
+    // Time
+    {
+        label := Label.{};
+        Label.set_id(*label, .Date);
+        Label.set_ssm(*label, .BCD_Plus);
+        Label.set_sdi(*label, 0b00);
+        Label.set_bcd_value_with_radix(*label, 24, 10, 11, 18);
+        Label.set_bcd_value_with_radix(*label, 11, 10, 19, 23);
+        Label.set_bcd_value_with_radix(*label, 27, 10, 24, 29);
+        Label.set_sdi(*label, 0b01);
+        Label.set_parity(*label, .Odd);        
+        print("Date: %, %, % (raw: %)\n", Label.get_bcd_value_with_radix(*label, 10, 11, 18), Label.get_bcd_value_with_radix(*label, 10, 19, 23), Label.get_bcd_value_with_radix(*label, 10, 24, 29), format_int(label.raw, .Hexadecimal, false, true, 0));
+    }
+
+    // Outer Rotary Label
+    {
+        label := Label.{};
+        Label.set_id(*label, .MFD_DoubleStageKnob2);
+        Label.set_ssm(*label, .BNR_NormalOperation);
+        Label.set_bnr(*label, 0, 1, 16, 28, 29);  // Rotation in tics
+        Label.set_discrete_bit(*label, true, 15); // Rotation validity
+        Label.set_discrete(*label, MFD_KeyStatus.Short, 11, 14); // Press validity, down, press duration
+        print("DoubleStageKnob2: %, %, %, % (raw: %)\n", Label.get_discrete_bit(*label, 15), Label.get_discrete_bit(*label, 14), Label.get_discrete_bit(*label, 13), Label.get_discrete(*label, 11, 13), format_int(label.raw, .Hexadecimal, false, true, 0));
+    }
+
+    return 0;
+}
+*/

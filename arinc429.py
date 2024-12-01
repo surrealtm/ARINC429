@@ -4,11 +4,11 @@ class Id(IntEnum):
     Altitude          = 0o076
     DoubleStageKnob1  = 0o136
     DoubleStageKnob2  = 0o137
-    Lsk1Lsk4          = 0o141 # @Incomplete: Preface these with MFD?
-    Lsk5Bsk2          = 0o142
-    Lsk7Lsk10         = 0o143
-    Lsk11Bsk4         = 0o144
-    Bsk5Msk2          = 0o145
+    MFD_Lsk1Lsk4      = 0o141
+    MFD_Lsk5Bsk2      = 0o142
+    MFD_Lsk7Lsk10     = 0o143
+    MFD_Lsk11Bsk4     = 0o144
+    MFD_Bsk5Msk2      = 0o145
     MagneticVariation = 0o147
     GreenwichMeanTime = 0o150
     Date              = 0o260
@@ -50,20 +50,21 @@ class SSM(IntEnum):
     Discrete_FunctionalTest  = 0b10
     Discrete_FailureWarning  = 0b11
 
-# @Incomplete: Rename to MFD_KeyStatus
-# @Incomplete: Maybe include the button validity flag in this?
-class ButtonStatus(IntEnum):
-    Released = 0b000
-    Short    = 0b001
-    Medium   = 0b010
-    Long     = 0b011
-    Pressed  = 0b100
+# Each MFD key is encoded using 4 bits in a discrete label:
+#   1. Validity of the key (press)
+#   2. Whether the key is currently being pressed
+#   3 / 4. Indication of the press duration
+class MFD_KeyStatus(IntEnum):
+    Released = 0b1000
+    Short    = 0b1001
+    Medium   = 0b1010
+    Long     = 0b1011
+    Pressed  = 0b1100
 
 class Parity(IntEnum):
     Even = 0
     Odd  = 1
 
-# @Incomplete: Implement getters for all the existing setters
 class Label:
     raw: int = 0
 
@@ -162,6 +163,70 @@ class Label:
 
 
         
+    # ----------------------------------------------- Setters -----------------------------------------------
+
+    def get_raw(self, first_bit: int, last_bit: int) -> int:
+        # Make sure the bit indices are valid
+        if not arinc429_ensure_indices_in_bounds(first_bit, last_bit):
+            return 0
+
+        result = arinc429_clear_except_range(self.raw, first_bit, last_bit)
+        result >>= first_bit - 1
+        return result
+
+    def get_id(self) -> Id:
+        return self.get_raw(1, 8)
+
+    def get_ssm(self) -> SSM:
+        return self.get_raw(30, 31)
+
+    def get_sdi(self) -> int:
+        return self.get_raw(9, 10)
+
+    def get_parity(self) -> int:
+        return self.get_raw(32, 32)
+
+    def get_bnr(self, resolution: float, first_bit: int, last_bit: int, sign_bit: int) -> float:
+        encoded = self.get_raw(first_bit, last_bit)
+
+        result  = float(encoded) * resolution
+        if self.get_raw(sign_bit, sign_bit) != 0:
+            result = -result
+
+        return result
+
+    def get_bcd_digit(self, first_bit: int, last_bit: int) -> int:
+        return self.get_raw(first_bit, last_bit)
+
+    def get_bcd_value_with_radix(self, radix: int, first_bit: int, last_bit: int) -> int:
+        # Calculate the bits per digit
+        if radix != 10:
+            arinc429_report_error("The BCD radix '" + str(radix) + "' is unsupported (only 10 is for now).")
+            return 0
+
+        bits_per_digit = 4 # Hardcoded for radix == 10
+
+        # Read each digit to the label until we run out of space
+        result = 0
+        power  = 1
+        start_bit = first_bit
+
+        while start_bit <= last_bit:
+            end_bit = last_bit if (start_bit + bits_per_digit - 1) > last_bit else start_bit + bits_per_digit - 1
+            result += self.get_bcd_digit(start_bit, end_bit) * power
+            power *= radix
+            start_bit = end_bit + 1
+
+        return result
+
+    def get_discrete(self, first_bit: int, last_bit: int) -> int:
+        return self.get_raw(first_bit, last_bit)
+
+    def get_discrete_bit(self, bit: int) -> int:
+        return self.get_raw(bit, bit)
+
+    
+        
 # -------------------------------------------- File Scope Helpers --------------------------------------------
 
 def arinc429_highest_bit_set(value: int) -> int:
@@ -199,8 +264,7 @@ def arinc429_clear_except_range(value: int, first_bit: int, last_bit: int) -> in
 
 # -------------------------------------------------- Tests --------------------------------------------------
 
-# @Incomplete: Make sure we properly report all errors here...
-
+'''
 def arinc429_test_ground_speed_label():
     label = Label()
     label.set_id(Id.GroundSpeed)
@@ -208,7 +272,7 @@ def arinc429_test_ground_speed_label():
     label.set_sdi(0b00)
     label.set_bnr(140, 4096 / 32768, 14, 28, 29)
     label.set_parity(Parity.Odd)
-    print("GroundSpeed: " + hex(label.raw))
+    print("GroundSpeed: " + str(label.get_bnr(4096 / 32768, 14, 28, 29)) + " (raw: " + hex(label.raw) + ")")
 
 def arinc429_test_date_label():
     label = Label()
@@ -219,19 +283,18 @@ def arinc429_test_date_label():
     label.set_bcd_value_with_radix(27, 10, 24, 29)
     label.set_sdi(0b01)
     label.set_parity(Parity.Odd)
-    print("Date: " + hex(label.raw))
+    print("Date: " + str(label.get_bcd_value_with_radix(10, 11, 18)) + ", " + str(label.get_bcd_value_with_radix(10, 19, 23)) + ", " + str(label.get_bcd_value_with_radix(10, 24, 29)) + " (raw: " + hex(label.raw) + ")")
 
 def arinc429_test_outer_rotary_label():
     label = Label()
     label.set_id(Id.DoubleStageKnob2)
     label.set_ssm(SSM.BNR_NormalOperation)
-    label.set_bnr(0, 1, 16, 28, 29)
-    label.set_discrete_bit(True, 15)
-    label.set_discrete_bit(True, 14)
-    label.set_discrete_bit(False, 13)
-    label.set_discrete(ButtonStatus.Short, 11, 13)
-    print("DoubleStageKnob2: " + hex(label.raw))
+    label.set_bnr(0, 1, 16, 28, 29)  # Rotation in tics
+    label.set_discrete_bit(True, 15) # Rotation validity
+    label.set_discrete(MFD_KeyStatus.Short, 11, 14) # Press validity, down, press duration
+    print("DoubleStageKnob2: " + str(label.get_discrete_bit(15)) + ", " + str(label.get_discrete_bit(14)) + ", " + str(label.get_discrete_bit(13)) + ", " + str(label.get_discrete(11, 13)) + " (raw: " + hex(label.raw) + ")")
     
 arinc429_test_ground_speed_label()
 arinc429_test_date_label()
 arinc429_test_outer_rotary_label()
+'''
